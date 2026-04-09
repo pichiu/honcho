@@ -29,7 +29,6 @@ honcho/
 │   │   ├── deriver.py           # Deriver 相關的 DB 操作
 │   │   ├── peer_card.py         # Peer card 存取
 │   │   ├── representation.py    # RepresentationManager（取得工作表示）
-│   │   ├── session.py           # Session 操作
 │   │   └── webhook.py           # Webhook 端點管理
 │   │
 │   ├── routers/                  # API 路由處理器
