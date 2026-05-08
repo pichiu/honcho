@@ -1,6 +1,6 @@
 # Honcho 技術文件索引
 
-> 文件版本：基於 Honcho v3.0.5 | 產出日期：2026-04-09
+> 文件版本：基於 Honcho v3.0.6-rc | 最後更新：2026-05-08（增量 trace 5b6bd59→a4ae372）
 
 ## 一句話總結
 
@@ -24,6 +24,7 @@
 | LLM（Dialectic high）| Anthropic Claude Haiku 4.5 | - | 中高推理查詢 |
 | LLM（Dream）| Anthropic Claude Sonnet 4 | - | 記憶整合（預設）|
 | 嵌入 | OpenAI text-embedding-3-small | - | 向量嵌入（預設）|
+| CLI 工具 | honcho-cli | - | 終端機 workspace 管理與除錯 |
 | 遷移 | Alembic | ≥1.14.0 | 資料庫 schema 遷移 |
 | 序列化 | Pydantic v2 | ≥2.11.7 | 輸入驗證與設定 |
 | 部署 | Docker + Fly.io | - | 容器化和雲端部署 |
@@ -64,6 +65,13 @@ uv run basedpyright                        # 類型檢查
 cp docker-compose.yml.example docker-compose.yml
 docker compose up -d database              # 只啟動資料庫
 docker compose up                          # 啟動完整服務
+
+# CLI 工具（v3.0.6+ 新增）
+uv tool install honcho-cli                 # 安裝 CLI
+honcho init                                # 設定 API key + URL
+honcho doctor                              # 健康檢查
+honcho workspace queue-status -w <ws>      # 查看佇列狀態
+honcho peer representation -w <ws> -p <peer> --observer <obs>  # 查看記憶
 ```
 
 ---
@@ -110,3 +118,8 @@ docker compose up                          # 啟動完整服務
 | **HNSW** | Hierarchical Navigable Small World — 向量近似近鄰搜尋演算法 |
 | **Reconciler** | 向量儲存同步背景任務（pgvector ↔ Turbopuffer/LanceDB）|
 | **SSE** | Server-Sent Events — Dialectic streaming 回應格式 |
+| **ModelTransport** | LLM 傳輸協定類型：`"anthropic"` / `"openai"` / `"gemini"`（取代舊的 SupportedProviders）|
+| **ModelConfig** | 統一 LLM 模型配置物件（model + transport + 可選參數），取代分散的 PROVIDER/MODEL 字串對 |
+| **ThinkingEffortLevel** | 推理思考強度：`none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max` |
+| **ProviderBackend** | `src/llm/backend.py` 中的 ABC，各 LLM provider 的統一介面（AnthropicBackend / GeminiBackend / OpenAIBackend）|
+| **honcho-cli** | 命令列工具，用於 workspace/peer/session 的終端機操作與除錯（`uv tool install honcho-cli`）|
