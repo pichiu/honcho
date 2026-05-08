@@ -1,6 +1,6 @@
 # DEV_GUIDE.md — 開發者指南
 
-> 基於 Honcho v3.0.5 | 參考來源：recon.md + configuration.md + web_findings.md
+> 基於 Honcho v3.0.6-rc | 最後更新：2026-05-08（增量 trace 5b6bd59→a4ae372）
 
 ---
 
@@ -270,9 +270,74 @@ refactor: extract config helpers to separate module
 
 ---
 
-## 6. 新增功能指南
+## 6. honcho-cli 使用指南
 
-### 6.1 新增 API 端點
+> <!-- 新增於 2026-05-08, 5b6bd59→a4ae372 -->
+
+`honcho-cli` 是 v3.0.6 新增的命令列工具，用於終端機操作 Honcho workspace 以及除錯記憶狀態。
+
+### 6.1 安裝
+
+```bash
+uv tool install honcho-cli
+```
+
+### 6.2 初始設定
+
+```bash
+honcho init     # 設定 API key + Honcho URL
+                # 寫入 ~/.honcho/config.json
+honcho doctor   # 健康檢查（config、連線、workspace、peer、佇列）
+```
+
+設定檔路徑：`~/.honcho/config.json`
+```json
+{
+  "apiKey": "your-jwt-token",
+  "environmentUrl": "http://localhost:8000"
+}
+```
+
+### 6.3 常用除錯指令
+
+```bash
+# 查看佇列狀態（確認 Deriver 是否正在處理）
+honcho workspace queue-status -w <workspace_name>
+honcho workspace queue-status -w <ws> --observer <agent>  # 過濾特定觀察者
+
+# 查看 peer 的記憶表示
+honcho peer representation -w <ws> -p <peer_id> --observer <obs>
+
+# 查看 peer card
+honcho peer card -w <ws> -p <peer_id>
+
+# 即時 Dialectic 查詢
+honcho peer chat -w <ws> -p <peer_id> --observer <obs> "<query>"
+
+# 列出近期觀察記錄
+honcho conclusion search -w <ws> "<search_query>"
+
+# 查看 session 對話歷史
+honcho session context -w <ws> -s <session_id>
+```
+
+### 6.4 範圍 flags
+
+所有命令支援以下範圍 flags（或環境變數）：
+
+| Flag | 環境變數 | 說明 |
+|------|---------|------|
+| `-w` / `--workspace` | `HONCHO_WORKSPACE` | Workspace 名稱 |
+| `-p` / `--peer` | `HONCHO_PEER` | Peer 名稱 |
+| `-s` / `--session` | `HONCHO_SESSION` | Session 名稱 |
+
+<!-- 新增結束 -->
+
+---
+
+## 7. 新增功能指南
+
+### 7.1 新增 API 端點
 
 1. 在 `src/routers/` 選擇對應的 router 檔案（或建立新的）
 2. 在 `src/crud/` 新增 DB 操作函式
@@ -319,7 +384,7 @@ async def do_action(
 
 ---
 
-## 7. 除錯技巧
+## 8. 除錯技巧
 
 ### 7.1 查看資料庫查詢
 
@@ -410,7 +475,7 @@ WHERE last_updated < NOW() - INTERVAL '10 minutes';
 
 ---
 
-## 8. 部署指南
+## 9. 部署指南
 
 ### 8.1 Fly.io 部署
 
@@ -468,7 +533,7 @@ CACHE_DEFAULT_TTL_SECONDS=3600
 
 ---
 
-## 9. 常見問題
+## 10. 常見問題
 
 ### Q: 訊息建立了，但 Deriver 沒有處理？
 
@@ -525,18 +590,33 @@ LLM_EMBEDDING_PROVIDER=openrouter
 
 ### Q: 如何使用自架 Ollama / vLLM？
 
-```env
-LLM_VLLM_BASE_URL=http://localhost:11434/v1  # Ollama 相容 OpenAI 格式
-# 或
-LLM_OPENAI_COMPATIBLE_BASE_URL=http://localhost:8080/v1
-LLM_OPENAI_COMPATIBLE_API_KEY=placeholder
+<!-- 更新於 2026-05-08, 5b6bd59→a4ae372：ModelTransport 不再有 vllm/custom -->
+
+v3.0.6+ 的 `ModelTransport` 只有三個值：`"anthropic"`, `"openai"`, `"gemini"`。
+自架模型需透過 `ModelOverrideSettings`（`api_key` + `base_url`）覆蓋：
+
+```toml
+# config.toml（以 Deriver 為例）
+[deriver.model_config.overrides]
+base_url = "http://localhost:11434/v1"   # Ollama OpenAI-compatible endpoint
+api_key = "placeholder"
+
+[deriver.model_config]
+transport = "openai"                     # 使用 OpenAI 相容格式
+model = "llama3"
 ```
 
-然後在 config.toml 中設定對應 component 使用 `vllm` 或 `custom` provider。
+對應環境變數：
+```env
+DERIVER_MODEL_CONFIG__TRANSPORT=openai
+DERIVER_MODEL_CONFIG__MODEL=llama3
+DERIVER_MODEL_CONFIG__OVERRIDES__BASE_URL=http://localhost:11434/v1
+DERIVER_MODEL_CONFIG__OVERRIDES__API_KEY=placeholder
+```
 
 ---
 
-## 10. 相關資源
+## 11. 相關資源
 
 | 資源 | 說明 |
 |------|------|
