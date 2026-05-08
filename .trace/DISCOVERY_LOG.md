@@ -1,6 +1,7 @@
 # DISCOVERY_LOG.md — 探索紀錄
 
-> 本文件記錄在 Honcho v3.0.5 程式碼 trace 過程中發現的問題、技術債、設計疑問與潛在改進點。
+> 本文件記錄在 Honcho 程式碼 trace 過程中發現的問題、技術債、設計疑問與潛在改進點。
+> 初次 trace：v3.0.5（5b6bd59）| 增量更新：v3.0.6-rc（a4ae372，2026-05-08）
 
 ---
 
@@ -48,6 +49,8 @@
 - 必須距離上次 dream 至少 MIN_HOURS_BETWEEN_DREAMS
 
 這些條件需要**同時滿足**，但文件給人印象是「定時觸發」。
+
+> ✅ **部分修正（a4ae372）**：v3.0.6 修正了閾值計算邏輯：現在只計算 `level = "explicit"` 的文件（Dreamer 自身的輸出不計入），避免了 feedback loop。同時 `last_dream_document_count` 現在只在 dream **成功完成後**才更新。D-003 描述的設計複雜性仍存在，但行為已更正確。
 
 ---
 
@@ -230,3 +233,67 @@
 ### D-022：Provider 備用切換的優雅降級
 
 `honcho_llm_call()` 中，Gemini 的 SAFETY/RECITATION/PROHIBITED_CONTENT 回應會自動觸發 backup provider 切換。這確保了即使主要 LLM 拒絕回應，系統仍能嘗試備用方案，提升可用性。
+
+> 📝 **v3.0.6 更新**：此機制已遷移到 `src/llm/api.py` 的 `AttemptPlan` 模式，邏輯更清晰。`ProviderBackend` ABC 讓各後端的 fallback 觸發條件可以獨立定義。
+
+---
+
+## 8. 增量更新發現（2026-05-08，5b6bd59→a4ae372）
+
+<!-- 新增於 2026-05-08 -->
+
+### D-023：src/utils/clients.py 全面被 src/llm/ 取代（架構里程碑）
+
+**發現**：`src/utils/clients.py`（2575 行）在 v3.0.6 中被完全刪除，由全新的 `src/llm/` 套件（16 個檔案）取代。
+
+**意義**：
+- `ModelTransport` 簡化：`Literal["anthropic", "openai", "gemini"]` 取代原本六個 provider 字串。`custom`/`vllm`/`groq` 不再是一等公民，改透過 `ModelOverrideSettings.base_url` 實現
+- `ProviderBackend` ABC 讓各後端的實作邊界更清晰，未來新增後端不需修改核心邏輯
+- `tool_loop.py` 獨立成模組，工具呼叫循環有了更好的測試邊界
+- Prompt caching（`PromptCachePolicy`）成為一等功能
+
+**注意**：任何直接 `from src.utils.clients import ...` 的程式碼都會在 v3.0.6 中 ImportError。
+
+---
+
+### D-024：Dialectic 的內部 N+1 查詢問題已修正
+
+**發現**：`fix: internal N+1 query in dialectic agent calls - DEV-1721` — Dialectic agent 在工具呼叫循環中存在 N+1 查詢問題，已於本次更新修正。
+
+**原始影響**：每次工具迭代都可能觸發額外 DB 查詢，在 `high`/`max` 推理等級（最多 10 次工具迭代）下更為明顯。
+
+---
+
+### D-025：向量同步 Retry 預算大幅增加
+
+**發現**：`fix: give vector sync a substantial retry budget` — `src/reconciler/sync_vectors.py` 中 tenacity 重試次數顯著增加。
+
+**背景**：原本 D-006 觀察到嵌入失敗後缺乏重試機制，本次更新至少在向量同步部分有所改進。嵌入生成本身的重試（embedding=NULL 的記錄）仍需確認。
+
+---
+
+### D-026：honcho-cli 引入了新的除錯模式
+
+**發現**：`honcho-cli` 提供 `workspace queue-status` 指令，可以直接查看 QueueItem 表的狀態，是 D-005（孤兒鎖）和 Deriver 卡住問題的重要除錯工具。
+
+**建議**：生產環境部署時應同步部署 honcho-cli，方便運維人員快速診斷。
+
+---
+
+### D-027：新整合生態（v3.0.6）
+
+v3.0.6 新增 4 個官方整合指南，反映生態系統擴展：
+- **SillyTavern**：AI roleplay 平台整合（支援 group chat）
+- **Paperclip**：macOS AI assistant
+- **OpenCode**：terminal coding assistant（Honcho 作為記憶後端）
+- **Vercel AI SDK**：Web app 整合（cookbook 風格指南）
+
+---
+
+### D-028：ModelConfig 的 ThinkingEffortLevel 比原本更豐富
+
+**發現**：新的 `ThinkingEffortLevel = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]` 有 7 個等級，比原本的 `THINKING_BUDGET_TOKENS` 整數設定更易理解。
+
+**注意**：`xhigh` 是介於 `high` 和 `max` 之間的新等級，原本文件未記錄此等級。建議確認各等級的具體 token budget 對應值。⚠️ 未驗證
+
+<!-- 新增結束 -->
