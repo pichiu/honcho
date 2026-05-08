@@ -13,6 +13,7 @@ graph TB
         SDK_TS["TypeScript SDK\n(@honcho-ai/sdk)"]
         MCP["MCP Server\n(Claude 直接存取)"]
         DIRECT["直接 HTTP 呼叫"]
+        CLI["honcho-cli\n(終端機工具)"]
     end
 
     subgraph API["API Server（src/main.py）"]
@@ -60,7 +61,14 @@ graph TB
         GEMINI["Google Gemini\n(Deriver + low Dialectic)"]
         ANTHROPIC["Anthropic Claude\n(Dreamer + med/high/max Dialectic)"]
         OPENAI_EMB["OpenAI\n(嵌入向量)"]
-        CUSTOM["OpenAI Compatible\n(OpenRouter / vLLM / Groq)"]
+        CUSTOM["OpenAI Compatible\n(base_url 自訂端點)"]
+    end
+
+    subgraph LLM_MOD["src/llm/ 模組"]
+        LLM_API["api.py\nhoncho_llm_call\n(retry + telemetry)"]
+        LLM_REG["registry.py\nLRU-cached clients\nProviderBackend 選擇"]
+        LLM_BACKENDS["backends/\nAnthropicBackend\nGeminiBackend\nOpenAIBackend"]
+        LLM_TOOLLOOP["tool_loop.py\nexecute_tool_loop"]
     end
 
     CLIENT --> API
@@ -80,10 +88,17 @@ graph TB
     CONSUMER --> RECONCILER
     CONSUMER --> WEBHOOK_DLV
 
-    DERIVER --> GEMINI
-    DREAMER --> ANTHROPIC
-    D_AGENT --> GEMINI
-    D_AGENT --> ANTHROPIC
+    DERIVER --> LLM_API
+    DREAMER --> LLM_API
+    D_AGENT --> LLM_API
+
+    LLM_API --> LLM_REG
+    LLM_REG --> LLM_BACKENDS
+    LLM_API --> LLM_TOOLLOOP
+
+    LLM_BACKENDS --> GEMINI
+    LLM_BACKENDS --> ANTHROPIC
+    LLM_BACKENDS --> CUSTOM
 
     ROUTER -->|"POST /peers/{id}/chat"| D_AGENT
 
@@ -99,6 +114,7 @@ graph TB
     DREAMER --> OPENAI_EMB
 
     style CLIENT fill:#e8f5e9
+    style LLM_MOD fill:#ede7f6
     style API fill:#e3f2fd
     style QUEUE fill:#fff3e0
     style WORKER fill:#f3e5f5
@@ -106,6 +122,8 @@ graph TB
     style STORAGE fill:#fce4ec
     style LLM fill:#f9fbe7
 ```
+
+<!-- 更新於 2026-05-08, 5b6bd59→a4ae372 -->
 
 ---
 
@@ -122,8 +140,8 @@ graph TB
 | **Deriver** | `src/deriver/deriver.py` | 批次訊息處理、呼叫 LLM 擷取明確觀察記錄、排程 dream |
 | **Dreamer** | `src/dreamer/orchestrator.py` | Dream 週期協調：Surprisal 採樣 → Deduction Specialist → Induction Specialist |
 | **DialecticAgent** | `src/dialectic/core.py` | 工具迭代循環、推理等級選擇、自然語言回應合成 |
-| **Agent Tools** | `src/utils/agent_tools.py` | 共用工具定義（11 個工具）+ `create_tool_executor()` 工廠 |
-| **LLM Client** | `src/utils/clients.py` | 多 provider 統一介面、工具呼叫循環、備用 provider 切換 |
+| **Agent Tools** | `src/utils/agent_tools.py` | 共用工具定義（11 個工具）+ `create_tool_executor()` 工廠；工具呼叫循環由 `src/llm/tool_loop.py` 執行 |
+| **LLM Package** | `src/llm/` | 多 provider 統一介面（16 個子模組）：`api.py` 頂層入口（retry + telemetry）、`registry.py` LRU-cached client singleton、`backends/` 三個後端實作（Anthropic/Gemini/OpenAI）、`tool_loop.py` 工具迭代循環、`caching.py` Prompt cache 策略、`runtime.py` AttemptPlan 配置解析；`ModelTransport = Literal["anthropic", "openai", "gemini"]`，自訂端點透過 `ModelConfig.api_key` + `base_url` 指定 |
 | **RepresentationManager** | `src/crud/representation.py` | 觀察記錄管理、語義搜尋、最高引用記錄取得 |
 | **Vector Store** | `src/vector_store/` | 可插拔向量儲存 ABC + pgvector/Turbopuffer/LanceDB 實作 |
 | **Reconciler** | `src/reconciler/` | pgvector → 外部向量儲存異步同步 |
@@ -131,6 +149,9 @@ graph TB
 | **Surprisal** | `src/dreamer/surprisal.py` | 幾何驚訝度計算（kNN 樹），識別需要重新探索的觀察記錄 |
 | **Cache** | `src/cache/client.py` | Redis 快取（cashews），降級為 no-op（若 CACHE_ENABLED=false） |
 | **Telemetry** | `src/telemetry/` | CloudEvents 批次發送、Prometheus 指標、Langfuse LLM 追蹤、Sentry 錯誤 |
+| **honcho-cli** | `honcho-cli/`（頂層套件） | 終端機操作與除錯工具；支援 workspace/peer/session/message/conclusion 指令；設定檔 `~/.honcho/config.json`；安裝：`uv tool install honcho-cli` |
+
+<!-- 更新於 2026-05-08, 5b6bd59→a4ae372 -->
 
 ---
 
@@ -211,7 +232,7 @@ graph TB
 ### 4.4 Dream 排程路徑
 
 ```
-Deriver 處理完 → document 計數 ≥ DOCUMENT_THRESHOLD
+Deriver 處理完 → explicit doc 計數（自上次 dream 後新增）≥ DOCUMENT_THRESHOLD
                           ↓
               DreamScheduler.schedule_dream()
                           ↓（等待 60 分鐘空閒）
@@ -220,7 +241,10 @@ Deriver 處理完 → document 計數 ≥ DOCUMENT_THRESHOLD
               QueueManager → Consumer → run_dream()
                           ↓
               Surprisal → Deduction → Induction
+                          ↓（成功後才更新 last_dream_at）
 ```
+
+> **注意**：閾值計算只計入 `level = "explicit"` 的 documents（Dreamer 輸出的 deductive/inductive doc 不計入），避免 Dreamer 自身的產出造成 feedback loop。
 
 ---
 
@@ -289,6 +313,22 @@ async with tracked_db("preflight") as db:
 # Phase 2: LLM 呼叫（無 DB 連線）
 result = await llm_call(...)
 ```
+
+### 決策 6：統一 LLM Package（src/llm/）
+
+**動機**：原本的 `src/utils/clients.py`（2575 行）將多 provider 邏輯、工具循環、快取策略、retry 全部混合，難以維護與測試。
+
+**實作**：
+- `ModelTransport = Literal["anthropic", "openai", "gemini"]` — 三個原生 transport；不再有 `custom`/`vllm`/`groq` 等獨立值，自訂端點改由 `ModelConfig.base_url` + `ModelConfig.api_key` 指定
+- `ProviderBackend` ABC 統一三個後端（AnthropicBackend / GeminiBackend / OpenAIBackend）介面
+- `registry.py` 持有 LRU-cached client singleton，測試可透過 `patch.dict(CLIENTS, {...})` 注入 mock
+- `api.py` 中 `honcho_llm_call()` 是唯一對外入口，封裝 retry（tenacity）與 telemetry
+- `tool_loop.py` 中 `execute_tool_loop()` 獨立管理工具迭代，不再嵌入主函式
+- `ModelConfig`（`src/config.py`）統一所有模型設定：model + transport + fallback + thinking_effort + cache_policy
+
+**取捨**：模組邊界更清晰，但引入更多檔案；provider 擴充需實作新 Backend 類別。
+
+<!-- 更新於 2026-05-08, 5b6bd59→a4ae372 -->
 
 ---
 
