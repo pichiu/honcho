@@ -83,9 +83,25 @@ honcho/
 │   │   ├── reasoning_traces.py  # LLM 推理追蹤（JSONL）
 │   │   └── sentry.py            # Sentry 初始化
 │   │
+│   ├── llm/                      # 🆕 LLM 編排套件（取代 utils/clients.py）
+│   │   ├── __init__.py          # 公開 API（honcho_llm_call, 型別等）
+│   │   ├── api.py               # 頂層入口（retry + telemetry）
+│   │   ├── backend.py           # ProviderBackend ABC
+│   │   ├── backends/            # AnthropicBackend / GeminiBackend / OpenAIBackend
+│   │   ├── caching.py           # Prompt cache 策略（PromptCachePolicy）
+│   │   ├── conversation.py      # 對話歷史管理
+│   │   ├── credentials.py       # API key 解析
+│   │   ├── executor.py          # 單次 LLM 呼叫（honcho_llm_call_inner）
+│   │   ├── history_adapters.py  # 跨 provider 歷史格式轉換
+│   │   ├── registry.py          # LRU-cached client singleton + backend 選擇
+│   │   ├── request_builder.py   # 請求建構
+│   │   ├── runtime.py           # AttemptPlan + 運行時 config 解析
+│   │   ├── structured_output.py # JSON/Pydantic 輸出支援
+│   │   ├── tool_loop.py         # 工具呼叫迭代循環
+│   │   └── types.py             # HonchoLLMCallResponse、IterationData 等
+│   │
 │   ├── utils/                    # 共用工具函式
 │   │   ├── agent_tools.py       # 三個 Agent 的工具定義 + create_tool_executor()
-│   │   ├── clients.py           # honcho_llm_call()（多 provider 統一介面）
 │   │   ├── search.py            # 混合搜尋（向量 + 全文）
 │   │   ├── summarizer.py        # Session 摘要（短摘 20 條 / 長摘 60 條）
 │   │   ├── formatting.py        # 訊息格式化
@@ -102,6 +118,14 @@ honcho/
 │   └── webhooks/                 # Webhook 系統
 │       ├── events.py            # QueueEmptyEvent 等事件定義
 │       └── webhook_delivery.py  # HTTP 遞送邏輯（含 HMAC 簽名）
+│
+├── honcho-cli/                   # 🆕 CLI 工具套件（honcho-cli）
+│   ├── src/honcho_cli/          # CLI 核心程式碼
+│   │   ├── main.py              # Typer CLI 入口
+│   │   ├── commands/            # workspace / peer / session / message / conclusion / setup
+│   │   ├── config.py            # ~/.honcho/config.json 讀寫
+│   │   └── output.py            # Rich 終端輸出格式化
+│   └── tests/                   # CLI 單元測試
 │
 ├── sdks/                         # 客戶端 SDK
 │   ├── python/                  # Python SDK（honcho-ai PyPI 套件）
@@ -160,7 +184,10 @@ honcho/
 | 修改 Dream（記憶整合）行為 | `src/dreamer/orchestrator.py` | Dream 週期協調 |
 | 修改 Dream specialists | `src/dreamer/specialists.py` | 演繹/歸納 specialist |
 | 新增 Agent 工具 | `src/utils/agent_tools.py` | TOOLS dict + executor |
-| 切換 LLM provider | `config.toml` / `.env` | 設定 DERIVER_PROVIDER 等 |
+| 切換 LLM provider / 模型 | `config.toml` / `.env` | 設定 `DERIVER_MODEL_CONFIG__TRANSPORT` 等；新系統使用 `ModelTransport`（anthropic/openai/gemini）|
+| 修改 LLM 呼叫邏輯 | `src/llm/` | `api.py`（入口）→ `executor.py`（單次）→ `tool_loop.py`（工具迭代）|
+| 新增 LLM 後端 | `src/llm/backends/` | 繼承 `ProviderBackend` ABC，在 `registry.py` 登記 |
+| 使用 CLI 除錯 | `honcho-cli/` | `uv tool install honcho-cli` 後執行 `honcho doctor` |
 | 新增向量儲存後端 | `src/vector_store/` | 繼承 `VectorStore` ABC |
 | 修改佇列處理邏輯 | `src/deriver/queue_manager.py` | QueueManager 類別 |
 | 修改設定系統 | `src/config.py` | 對應的 Settings 類別 |
